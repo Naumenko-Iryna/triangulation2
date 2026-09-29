@@ -69,15 +69,15 @@ def generate_mesh(nx, ny, verts, edge_types):
 
         # Створення шарів точок від контуру до центру
         node_map = {}
-        for s in range(num_edges): # Беремо зовнішні ребра. Остання вершина з'єднюється з нульовою
+        for s in range(num_edges): # беремо по черзі кожну сторону фігури
             p_start = verts[s]
             p_end = verts[(s + 1) % num_edges]
             b_val = edge_types[s] if s < len(edge_types) else 0
 
             for j in range(ny + 1):
-                t_rad = j / ny  # 0 на контурі, 1 в центрі
+                t_rad = j / ny  # 2. кожну знайдену на краю точку ми починаємо стягувати прямою лінією до центру
                 for i in range(nx + 1):
-                    t_edge = i / nx # знаходження проміжної точки на ребрі фігури
+                    t_edge = i / nx # 1. ділимо зовнішню сторону многокутника на Nx маленьких кроків і ставимо там точки
                     # Точка на поточному ребрі
                     bx = (1 - t_edge) * p_start[0] + t_edge * p_end[0] # векторна формула лінійного відрізка
                     by = (1 - t_edge) * p_start[1] + t_edge * p_end[1]
