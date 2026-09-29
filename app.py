@@ -99,11 +99,11 @@ def generate_mesh(nx, ny, verts, edge_types):
             for j in range(ny):
                 for i in range(nx):
                     def get_id(edge_idx, rad_idx):
-                        t_r = rad_idx / ny
-                        t_e = edge_idx / nx
-                        bx = (1 - t_e) * p_start[0] + t_e * p_end[0] # перераховуємо координати точок
+                        t_r = rad_idx / ny # наскільки ми близько до центру (0 - межа, 1 - центр)
+                        t_e = edge_idx / nx # де саме на поточному ребрі (від 0 до 1)
+                        bx = (1 - t_e) * p_start[0] + t_e * p_end[0] # перераховуємо координати точок. Точки на контурі
                         by = (1 - t_e) * p_start[1] + t_e * p_end[1]
-                        return node_map[(round((1 - t_r) * bx + t_r * center[0], 5), 
+                        return node_map[(round((1 - t_r) * bx + t_r * center[0], 5),  # точки після зміщення до центру
                                          round((1 - t_r) * by + t_r * center[1], 5))]
 
                     bl = get_id(i, j)
