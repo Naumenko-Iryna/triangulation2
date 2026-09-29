@@ -26,7 +26,7 @@ def generate_mesh(nx, ny, verts, edge_types):
     nodes, node_boundaries, elements = [], [], []
     num_edges = len(verts)
 
-    # Якщо передано стандартний чотирикутник — використовуємо білінійне відображення з коментарями
+    # Якщо передано стандартний чотирикутник — використовуємо білінійне відображення
     if num_edges == 4:
         # Генерація координат вузлів та їх маркування
         for j in range(ny + 1):
@@ -41,7 +41,7 @@ def generate_mesh(nx, ny, verts, edge_types):
                 if v == 0: b_mark = edge_types[0]      # Нижня грань V1 -> V2. Умова 2-го роду
                 elif u == 1: b_mark = edge_types[1]    # Права грань V2 -> V3. Умова 1-го роду
                 elif v == 1: b_mark = edge_types[2]    # Верхня грань V3 -> V4. Умова 2-го роду.
-                elif u == 0: b_mark = edge_types[3]    # Ліва грань V4 -> V1. Умова 3 роду.
+                elif u == 0: b_mark = edge_types[3]    # Ліва грань V4 -> V1. Умова 3-го роду.
                 node_boundaries.append(b_mark)
 
         # Триангуляція з максимізацією мінімального кута (критерій Делоне)
@@ -62,14 +62,14 @@ def generate_mesh(nx, ny, verts, edge_types):
                 else:
                     elements.extend([(bl, br, tl), (br, tr, tl)])
     else:
-        # Універсальне секторне розбиття для довільного n-кутника (трикутник, п'ятикутник тощо)
-        cx = sum(v[0] for v in verts) / num_edges
+        # Універсальне секторне розбиття для довільного n-кутника. радіально-секторний генератор сітки
+        cx = sum(v[0] for v in verts) / num_edges # Знаходимо центр фігури як середнє арифметичне
         cy = sum(v[1] for v in verts) / num_edges
         center = (cx, cy)
 
         # Створення шарів точок від контуру до центру
         node_map = {}
-        for s in range(num_edges):
+        for s in range(num_edges): # Беремо зовнішні ребра. Остання вершина з'єднюється з нульовою
             p_start = verts[s]
             p_end = verts[(s + 1) % num_edges]
             b_val = edge_types[s] if s < len(edge_types) else 0
@@ -77,19 +77,19 @@ def generate_mesh(nx, ny, verts, edge_types):
             for j in range(ny + 1):
                 t_rad = j / ny  # 0 на контурі, 1 в центрі
                 for i in range(nx + 1):
-                    t_edge = i / nx
+                    t_edge = i / nx # знаходження проміжної точки на ребрі фігури
                     # Точка на поточному ребрі
-                    bx = (1 - t_edge) * p_start[0] + t_edge * p_end[0]
+                    bx = (1 - t_edge) * p_start[0] + t_edge * p_end[0] # векторна формула лінійного відрізка
                     by = (1 - t_edge) * p_start[1] + t_edge * p_end[1]
                     # Стягування точки до центру області
-                    rx = (1 - t_rad) * bx + t_rad * center[0]
+                    rx = (1 - t_rad) * bx + t_rad * center[0] # з'єднує щойно знайдену точку ребра із центром фігури
                     ry = (1 - t_rad) * by + t_rad * center[1]
 
                     key = (round(rx, 5), round(ry, 5))
-                    if key not in node_map:
-                        node_map[key] = len(nodes)
+                    if key not in node_map: # перевіряємо чи вузл вже не був записаний в таблицю
+                        node_map[key] = len(nodes) # довжина списку і є порядковим номером вузла
                         nodes.append((rx, ry))
-                        b_mark = b_val if j == 0 else 0 # маркуємо лише контурні вузли
+                        b_mark = b_val if j == 0 else 0 # маркуємо крайовою умовою лише контурні вузли
                         node_boundaries.append(b_mark)
 
         # Формування комірок і тріангуляція Делоне в кожному секторі
@@ -101,7 +101,7 @@ def generate_mesh(nx, ny, verts, edge_types):
                     def get_id(edge_idx, rad_idx):
                         t_r = rad_idx / ny
                         t_e = edge_idx / nx
-                        bx = (1 - t_e) * p_start[0] + t_e * p_end[0]
+                        bx = (1 - t_e) * p_start[0] + t_e * p_end[0] # перераховуємо координати точок
                         by = (1 - t_e) * p_start[1] + t_e * p_end[1]
                         return node_map[(round((1 - t_r) * bx + t_r * center[0], 5), 
                                          round((1 - t_r) * by + t_r * center[1], 5))]
@@ -111,9 +111,9 @@ def generate_mesh(nx, ny, verts, edge_types):
                     tl = get_id(i, j + 1)
                     tr = get_id(i + 1, j + 1)
 
-                    # Якщо шар дістався центру, утворюється вироджений прямокутник -> беремо простий трикутник
+                    # розрізання кожної знайденої комірки на скінченні елементи
                     if tl == tr:
-                        if len({bl, br, tl}) == 3:
+                        if len({bl, br, tl}) == 3: # запобігає появі вироджених елементів із нульовою площею й додає один трикутник із вершиною в центроїді
                             elements.append((bl, br, tl))
                     else:
                         a1 = min(triangle_min_angle(nodes[bl], nodes[br], nodes[tr]),
@@ -223,8 +223,6 @@ with col2:
     
     nodes_log = "\n".join([f"N{i}: ({n[0]:.2f}, {n[1]:.2f}) | Границя: {b}" for i, (n, b) in enumerate(zip(nodes, boundaries))])
     st.text_area("Вузли (ID: X, Y | Маркер)", nodes_log, height=180)
-
-# --- 5. Звіт до завдання ---
 
 st.markdown("---")
 with st.expander("📄 Звіт до виконання завдання №1 (Метод скінченних елементів)", expanded=True):
