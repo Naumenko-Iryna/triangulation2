@@ -2,17 +2,19 @@ import streamlit as st
 import math
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
+import triangle as tr
 
-# --- 1. Геометричні допоміжні функції ---
+# --- 1. Геометричні розрахунки та перевірка опуклості ---
 
 def dist(p1, p2):
-    return math.hypot(p1[0] - p2[0], p1[1] - p2[1]) # Евклідова відстань між вузлами
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
 def triangle_min_angle(p1, p2, p3):
     a, b, c = dist(p2, p3), dist(p1, p3), dist(p1, p2)
     def angle(adj1, adj2, opp):
         if adj1 * adj2 == 0: return 0
-        # Теорема косинусів із чисельним захистом від float-похибок
+        # Теорема косинусів із захистом від похибок float
         val = max(-1.0, min(1.0, (adj1**2 + adj2**2 - opp**2) / (2 * adj1 * adj2)))
         return math.acos(val)
     return min(angle(b, c, a), angle(a, c, b), angle(a, b, c))
@@ -27,7 +29,7 @@ def parse_point(text, default):
     return default
 
 def check_convexity(verts):
-    # Перевірка опуклості через знакосталість векторного добутку
+    """Перевірка опуклості за знакосталістю векторного добутку суміжних сторін."""
     n = len(verts)
     signs = []
     for i in range(n):
@@ -37,118 +39,61 @@ def check_convexity(verts):
             signs.append(cross > 0)
     return len(set(signs)) <= 1
 
-# --- 2. Генератор сітки для довільного многокутника ---
+# --- 2. Генерація сітки через бібліотеку Triangle ---
 
-def generate_mesh(nx, ny, verts, edge_types):
-    nodes, node_boundaries, elements = [], [], []
-    num_edges = len(verts)
+def generate_mesh_triangle(verts, edge_types, min_angle):
+    """
+    Генерує сітку Делоне (CDT) за алгоритмом Рупперта за допомогою бібліотеки triangle.
+    Параметр min_angle керує якістю сітки: алгоритм автоматично вставляє 
+    точки Штайнера, поки всі кути не стануть >= min_angle.
+    """
+    n_v = len(verts)
+    # Зв'язування сегментів контуру та присвоєння їм типів крайових умов
+    segments = [[i, (i + 1) % n_v] for i in range(n_v)]
+    seg_markers = [edge_types[i] if i < len(edge_types) else 0 for i in range(n_v)]
 
-    # 1. Центроїд фігури
-    center = (sum(v[0] for v in verts) / num_edges, sum(v[1] for v in verts) / num_edges)
+    poly_data = {
+        'vertices': np.array(verts, dtype=np.float64),
+        'segments': np.array(segments, dtype=np.int32),
+        'segment_markers': np.array(seg_markers, dtype=np.int32)
+    }
 
-    # 2. Побудова вузлів із фільтрацією дублікатів
-    node_map = {}
-    for s in range(num_edges):
-        p_start = verts[s]
-        p_end = verts[(s + 1) % num_edges]
-        b_val = edge_types[s] if s < len(edge_types) else 0
+    # Прапорці Triangle:
+    # 'p' - планарний граф (PSLG)
+    # 'q{min_angle}' - автоматичне розбиття для забезпечення мінімального кута
+    # 'e' - експорт граничних ребер з їх маркерами
+    tri_args = f'pq{int(min_angle)}e'
+    mesh_out = tr.triangulate(poly_data, tri_args)
 
-        for j in range(ny + 1):
-            t_rad = j / ny  # 0 на межі, 1 в центрі
-            for i in range(nx + 1):
-                t_edge = i / nx
-                bx = (1 - t_edge) * p_start[0] + t_edge * p_end[0]
-                by = (1 - t_edge) * p_start[1] + t_edge * p_end[1]
-                rx = (1 - t_rad) * bx + t_rad * center[0]
-                ry = (1 - t_rad) * by + t_rad * center[1]
+    nodes = [tuple(p) for p in mesh_out['vertices'].tolist()]
+    elements = [tuple(t) for t in mesh_out['triangles'].tolist()]
 
-                key = (round(rx, 5), round(ry, 5))
-                if key not in node_map:
-                    node_map[key] = len(nodes)
-                    nodes.append((rx, ry))
-                    node_boundaries.append(b_val if j == 0 else 0)
+    # Перенесення числових маркерів крайових умов (1, 2, 3) на вузли
+    node_boundaries = [0] * len(nodes)
+    if 'vertex_markers' in mesh_out:
+        node_boundaries = [int(m[0]) for m in mesh_out['vertex_markers']]
+    elif 'edges' in mesh_out and 'edge_markers' in mesh_out:
+        for edge, mark in zip(mesh_out['edges'], mesh_out['edge_markers']):
+            m_val = int(mark[0])
+            if m_val > 0:
+                node_boundaries[edge[0]] = m_val
+                node_boundaries[edge[1]] = m_val
 
-    # 3. Розрізання на скінченні елементи за Делоне
-    for s in range(num_edges):
-        p_start = verts[s]
-        p_end = verts[(s + 1) % num_edges]
-        for j in range(ny):
-            for i in range(nx):
-                def get_id(edge_idx, rad_idx):
-                    t_r = rad_idx / ny
-                    t_e = edge_idx / nx
-                    bx = (1 - t_e) * p_start[0] + t_e * p_end[0]
-                    by = (1 - t_e) * p_start[1] + t_e * p_end[1]
-                    return node_map[(round((1 - t_r) * bx + t_r * center[0], 5), 
-                                     round((1 - t_r) * by + t_r * center[1], 5))]
-
-                bl, br = get_id(i, j), get_id(i + 1, j)
-                tl, tr = get_id(i, j + 1), get_id(i + 1, j + 1)
-
-                if tl == tr:
-                    if len({bl, br, tl}) == 3:
-                        elements.append((bl, br, tl))
-                else:
-                    a1 = min(triangle_min_angle(nodes[bl], nodes[br], nodes[tr]),
-                             triangle_min_angle(nodes[bl], nodes[tr], nodes[tl]))
-                    a2 = min(triangle_min_angle(nodes[bl], nodes[br], nodes[tl]),
-                             triangle_min_angle(nodes[br], nodes[tr], nodes[tl]))
-                    if a1 >= a2:
-                        elements.extend([(bl, br, tr), (bl, tr, tl)])
-                    else:
-                        elements.extend([(bl, br, tl), (br, tr, tl)])
-                        
     return nodes, elements, node_boundaries
 
-def evaluate_min_angle(nodes, elements):
-    """Швидке обчислення найменшого кута всієї сітки в градусах."""
-    if not elements:
-        return 0.0
-    angles = [math.degrees(triangle_min_angle(nodes[e[0]], nodes[e[1]], nodes[e[2]])) for e in elements]
-    return min(angles), angles
+# --- 3. Інтерфейс Streamlit ---
 
-def auto_refine_mesh(target_angle, verts, edge_types, max_density=12):
-    """
-    Адаптивний підбір густини розбиття:
-    Шукає комбінацію (nx, ny), що задовольняє target_angle,
-    або повертає найкращу знайдену геометрію.
-    """
-    best_mesh = None
-    best_min_angle = -1.0
-    best_params = (1, 1)
-    best_angles = []
+st.set_page_config(page_title="Триангуляція Делоне (Triangle)", layout="wide")
+st.title("Триангуляція області за критерієм мінімального кута (Triangle)")
 
-    # Перебираємо пропорційні густини розбиття
-    for density in range(1, max_density + 1):
-        for ny in range(1, density + 1):
-            nx = density
-            cur_nodes, cur_elems, cur_bounds = generate_mesh(nx, ny, verts, edge_types)
-            cur_min_angle, cur_angles = evaluate_min_angle(cur_nodes, cur_elems)
-
-            if cur_min_angle > best_min_angle:
-                best_min_angle = cur_min_angle
-                best_mesh = (cur_nodes, cur_elems, cur_bounds)
-                best_params = (nx, ny)
-                best_angles = cur_angles
-
-            # Якщо досягли бажаного критерію — фіксуємо результат
-            if cur_min_angle >= target_angle:
-                return best_mesh, best_params, best_min_angle, best_angles, True
-
-    return best_mesh, best_params, best_min_angle, best_angles, False
-
-# --- 3. Інтерфейс додатку (Streamlit) ---
-
-st.set_page_config(page_title="Адаптивна триангуляція Делоне", layout="wide")
-st.title("Адаптивна триангуляція області за критерієм мінімального кута")
-
-st.sidebar.header("Цільовий критерій якості")
-target_min_angle = st.sidebar.slider(
-    "Бажаний мінімальний кут (°):", 
+st.sidebar.header("Критерій якості сітки")
+# Користувач задає ТІЛЬКИ мінімальний кут
+min_angle_target = st.sidebar.slider(
+    "Мінімальний допустимий кут (°):", 
     min_value=10, 
-    max_value=35, 
+    max_value=33, 
     value=20,
-    help="Алгоритм автоматично підбере густину розбиття, щоб усі кути були не менші за це значення."
+    help="Бібліотека Triangle автоматично розіб'є область і додасть вузли, щоб кути були не менші за це значення."
 )
 
 st.sidebar.header("Геометрія області")
@@ -157,7 +102,7 @@ poly_choice = st.sidebar.selectbox("Шаблон фігури:",
 
 if poly_choice == "Варіант 12 (4-кутник)":
     raw_verts = ["1.0, 0.0", "2.0, 0.0", "0.0, 2.0", "0.0, 1.0"]
-    b_types = [2, 1, 2, 3] # Границі: 1-Діріхле, 2-Неймана, 3-Робіна
+    b_types = [2, 1, 2, 3] # 1-Діріхле, 2-Неймана, 3-Робіна
 elif poly_choice == "Трикутник (3 кути)":
     raw_verts = ["0.0, 0.0", "2.0, 0.0", "1.0, 1.73"]
     b_types = [1, 2, 3]
@@ -169,38 +114,36 @@ verts = [parse_point(st.sidebar.text_input(f"V{i+1}:", val), (0.0, 0.0)) for i, 
 
 # Перевірка опуклості
 if not check_convexity(verts):
-    st.sidebar.warning("⚠️ Фігура неопукла! Можливі накладання елементів.")
+    st.sidebar.warning("⚠️ Фігура неопукла! Перевірте порядок обходу точок.")
 else:
     st.sidebar.success("✓ Фігура опукла.")
 
-# Адаптивна генерація сітки під заданий кут
-(nodes, elements, boundaries), (opt_nx, opt_ny), actual_min_angle, element_angles, reached_target = auto_refine_mesh(
-    target_min_angle, verts, b_types
-)
+# Генерація сітки через Triangle
+nodes, elements, boundaries = generate_mesh_triangle(verts, b_types, min_angle_target)
 
-bad_elements = [i for i, a in enumerate(element_angles) if a < target_min_angle]
+# Розрахунок фактичних кутів
+element_angles = [math.degrees(triangle_min_angle(nodes[e[0]], nodes[e[1]], nodes[e[2]])) for e in elements]
+actual_min_angle = min(element_angles) if element_angles else 0.0
 
-# --- 4. Візуалізація та структурований вивід ---
+# --- 4. Графік та табличні дані ---
 
 col1, col2 = st.columns([1.1, 0.9])
 
 with col1:
     fig, ax = plt.subplots(figsize=(6.5, 6.5))
     
-    # Відмальовування елементів
+    # Відмальовування трикутників
     for idx, e in enumerate(elements):
         pts = [nodes[n] for n in e]
         xs = [p[0] for p in pts] + [pts[0][0]]
         ys = [p[1] for p in pts] + [pts[0][1]]
-        
-        if idx in bad_elements:
-            ax.fill(xs, ys, color='red', alpha=0.3)
         ax.plot(xs, ys, color='black', linewidth=0.8)
         
+        # Підпис індексу елемента в центроїді
         cx, cy = sum(p[0] for p in pts)/3, sum(p[1] for p in pts)/3
         ax.text(cx, cy, f"E{idx}", color='blue', fontsize=7, ha='center', va='center')
 
-    # Побудова вузлів
+    # Побудова та кодування граничних вузлів
     colors = {0: 'gray', 1: 'red', 2: 'green', 3: 'purple'}
     for idx, (node, b) in enumerate(zip(nodes, boundaries)):
         ax.plot(node[0], node[1], marker='o', markersize=5, color=colors.get(b, 'black'))
@@ -208,21 +151,15 @@ with col1:
 
     ax.set_aspect('equal')
     ax.grid(True, linestyle=':', alpha=0.6)
-    ax.set_title(f"Адаптована сітка: Nx={opt_nx}, Ny={opt_ny} | Мін. кут: {actual_min_angle:.1f}°")
+    ax.set_title(f"Triangle (CDT) | Отриманий мін. кут: {actual_min_angle:.1f}°")
     st.pyplot(fig)
 
 with col2:
-    st.subheader("Результати адаптивного розбиття")
-    st.metric("Досягнутий найменший кут", f"{actual_min_angle:.2f}°", delta=f"{actual_min_angle - target_min_angle:.2f}°")
-    st.write(f"**Підібрані параметри:** Nx = `{opt_nx}`, Ny = `{opt_ny}`")
+    st.metric("Фактичний найменший кут", f"{actual_min_angle:.2f}°", delta=f"{actual_min_angle - min_angle_target:.2f}°")
     st.write(f"**Вузлів:** {len(nodes)} | **Скінченних елементів:** {len(elements)}")
+    st.success(f"Бібліотека Triangle гарантувала якість: кути >= {min_angle_target}°")
 
-    if reached_target:
-        st.success(f"Цільовий критерій (>={target_min_angle}°) успішно досягнуто автоматично!")
-    else:
-        st.warning(f"Цільовий поріг {target_min_angle}° перевищує геометричні можливості області. Застосовано найкраще розбиття з кутом {actual_min_angle:.1f}°.")
-
-    # Таблиця зв'язності
+    # 1. Масив зв'язності (Таблиця)
     st.write("**Таблиця зв'язності (Topology)**")
     df_elements = pd.DataFrame({
         "Елемент": [f"E{i}" for i in range(len(elements))],
@@ -233,12 +170,14 @@ with col2:
     })
     st.dataframe(df_elements, height=180, use_container_width=True)
 
-    # Таблиця координат і маркерів вузлів
-    st.write("**Таблиця вузлів (Nodes & Boundary Markers)**")
+    # 2. Таблиця вузлів із числовим маркуванням для МСЕ
+    st.write("**Таблиця вузлів та крайових умов**")
+    b_labels = {0: "0 (Внутрішній)", 1: "1 (Діріхле)", 2: "2 (Неймана)", 3: "3 (Робіна)"}
     df_nodes = pd.DataFrame({
         "Вузол": [f"N{i}" for i in range(len(nodes))],
         "X": [round(n[0], 3) for n in nodes],
         "Y": [round(n[1], 3) for n in nodes],
-        "Маркер": boundaries
+        "Маркер": boundaries,
+        "Тип умови": [b_labels.get(b, str(b)) for b in boundaries]
     })
     st.dataframe(df_nodes, height=180, use_container_width=True)
