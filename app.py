@@ -105,7 +105,7 @@ st.set_page_config(page_title="Триангуляція Делоне", layout="w
 st.title("Триангуляція Делоне за критерієм мінімального кута")
 
 st.sidebar.header("Параметри")
-target_angle = st.sidebar.slider("Мінімальний кут (°)", 10.0, 32.0, 20.0, 1.0)
+target_angle = st.sidebar.slider("Мінімальний кут (°)", 10.0, 50.0, 20.0, 1.0)
 preset = st.sidebar.selectbox("Область:", ["Варіант 12 (4-кутник)", "Трикутник", "П'ятикутник"])
 
 presets = {
