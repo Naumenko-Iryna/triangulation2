@@ -1,3 +1,5 @@
-matplotlib
 streamlit
+matplotlib
+pandas
+numpy
 triangle
