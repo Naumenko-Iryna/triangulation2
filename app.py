@@ -30,9 +30,16 @@ def get_triangle_data(pts):
     return min_deg, np.array([ux, uy])
 
 def check_convexity(pts):
-    """Знакосталість векторного добутку."""
-    crosses = [np.cross(pts[(i+1)%len(pts)] - pts[i], pts[(i+2)%len(pts)] - pts[(i+1)%len(pts)]) for i in range(len(pts))]
-    signs = [c > 1e-7 for c in crosses if abs(c) > 1e-7]
+    """Знакосталість 2D векторного (косого) добутку без виклику np.cross."""
+    n = len(pts)
+    signs = []
+    for i in range(n):
+        v1 = pts[(i + 1) % n] - pts[i]
+        v2 = pts[(i + 2) % n] - pts[(i + 1) % n]
+        # Двовимірний векторний добуток: x1*y2 - y1*x2
+        cross_2d = v1[0] * v2[1] - v1[1] * v2[0]
+        if abs(cross_2d) > 1e-7:
+            signs.append(cross_2d > 0)
     return len(set(signs)) <= 1
 
 # --- 2. Генерація сітки Делоне з контролем кута ---
